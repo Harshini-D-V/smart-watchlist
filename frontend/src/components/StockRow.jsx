@@ -20,8 +20,11 @@ function fmt(n, d = 2) {
 function secondsAgo(iso) {
   if (!iso) return null;
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  return Math.max(0, diff); // clamp to 0 — never show negative
+  return Math.max(0, diff);
 }
+
+// Track when we first received this fetched_at value in the browser
+const receivedAtCache = new Map(); // fetched_at iso → browser timestamp when first seen
 
 /** Tiny inline SVG sparkline */
 function MiniSpark({ points = [], up = true, w = 72, h = 36 }) {
@@ -89,9 +92,18 @@ export function StockRow({ userId, symbol, priceData, diffItem, metaItem, onOpen
   const currency  = symbol.endsWith('.NS') || symbol.endsWith('.BO') ? '₹' : '$';
   const sectorColor = sector ? getSectorColor(sector) : '#94a3b8';
 
-  // Live age
+  // Live age — track when fetched_at was first seen in browser to avoid server clock skew
   useEffect(() => {
-    const id = setInterval(() => setAge(secondsAgo(fetchedAt)), 1000);
+    if (fetchedAt && !receivedAtCache.has(fetchedAt)) {
+      receivedAtCache.set(fetchedAt, Date.now());
+    }
+    const getAge = () => {
+      if (!fetchedAt) return null;
+      const receivedAt = receivedAtCache.get(fetchedAt) ?? Date.now();
+      return Math.floor((Date.now() - receivedAt) / 1000);
+    };
+    setAge(getAge());
+    const id = setInterval(() => setAge(getAge()), 1000);
     return () => clearInterval(id);
   }, [fetchedAt]);
 

@@ -35,6 +35,8 @@ function secondsAgo(iso) {
   return Math.max(0, diff);
 }
 
+const receivedAtCache = new Map();
+
 export function StockDetail({ userId, symbol, priceData, diffItem, metaItem, allMeta, allPrices, diffMap, onBack }) {
   const [range, setRange]               = useState('1w');
   const [chartData, setChartData]       = useState(null);
@@ -53,9 +55,19 @@ export function StockDetail({ userId, symbol, priceData, diffItem, metaItem, all
   const currency  = (chartData?.currency === 'INR' || symbol.endsWith('.NS') || symbol.endsWith('.BO')) ? '₹' : '$';
   const isUp      = changePct !== null ? changePct >= 0 : true;
 
-  // Live freshness ticker
+  // Live freshness ticker — use browser-local received time to avoid server clock skew
   useEffect(() => {
-    const id = setInterval(() => setAge(secondsAgo(priceData?.fetched_at)), 1000);
+    const fetchedAt = priceData?.fetched_at;
+    if (fetchedAt && !receivedAtCache.has(fetchedAt)) {
+      receivedAtCache.set(fetchedAt, Date.now());
+    }
+    const getAge = () => {
+      if (!fetchedAt) return null;
+      const receivedAt = receivedAtCache.get(fetchedAt) ?? Date.now();
+      return Math.floor((Date.now() - receivedAt) / 1000);
+    };
+    setAge(getAge());
+    const id = setInterval(() => setAge(getAge()), 1000);
     return () => clearInterval(id);
   }, [priceData?.fetched_at]);
 
