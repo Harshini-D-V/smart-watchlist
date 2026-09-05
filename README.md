@@ -72,7 +72,7 @@ Using only the relative threshold had a real bug: if you visit once a day, `chan
 
 Every Yahoo Finance fetch is wrapped in try/catch. On failure the last known price is served from `price_snapshots` with `fetch_failed: true`. The frontend shows `⚠ last known price` instead of a freshness timestamp. The app degrades gracefully — it never goes blank or throws.
 
-**To demo this:** turn off WiFi briefly. The stale badge appears within 90 seconds. Turn WiFi back on and it recovers on the next poll cycle.
+**To demo this:** turn off WiFi. The poller runs every 25s but the stale badge appears after 90s — that's the intentional staleness threshold in the price route. One failed poll doesn't immediately flag data as stale (a single network blip shouldn't alarm the user); data is only marked stale after ~3–4 consecutive missed cycles. Turn WiFi back on and it recovers on the next successful poll.
 
 ### 2. Concurrent edits from two devices (race condition)
 
@@ -107,7 +107,7 @@ The meaningful-change threshold uses a fixed 2% absolute floor rather than each 
 
 ### 1. Database
 
-Paste `supabase/schema.sql` into the Supabase SQL Editor and run it. Then run `supabase/schema_fix3.sql` to grant the correct permissions.
+Paste `supabase/schema.sql` into the Supabase SQL Editor and run it. This creates all tables, indexes, RLS settings, and permissions in one step.
 
 ### 2. Backend
 
