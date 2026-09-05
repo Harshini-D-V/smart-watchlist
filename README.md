@@ -2,6 +2,7 @@
 
 A real-time stock watchlist that answers one question: **what meaningfully changed since you were last here?**
 
+**Live demo:** https://smart-watchlist-blue.vercel.app
 **Repo:** https://github.com/Harshini-D-V/smart-watchlist
 
 ---
