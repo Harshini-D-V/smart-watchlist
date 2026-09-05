@@ -148,14 +148,4 @@ curl http://localhost:4000/api/health
 
 Set environment variables in each platform's dashboard. Update `VITE_API_BASE` in the frontend `.env` to point at your Render URL before building.
 
----
 
-## Judging table self-check
-
-| Dimension | Where covered |
-|-----------|---------------|
-| Engineering Depth | Separate frontend/backend/DB; O(symbols) fetch deduplication; fallback-to-cache on fetch failure; Postgres indexes on (user_id, symbol) |
-| Product & Problem Interpretation | Two-condition meaningful-change definition; digest banner; expandable rows; sector chart; correlation insight — not a plain ticker list |
-| Edge Cases & Resilience | Fetch fallback with stale UI (demo: turn off WiFi); last-write-wins concurrent edits via Postgres upsert; session gap prevents diff being zeroed on every poll |
-| Code Quality & Simplicity | Two-condition threshold instead of ML; AI scoped to exactly one endpoint with a plain-string fallback; no causal language in AI output or correlation card |
-| Originality & Thoughtfulness | Every "you decide" item from the brief (meaningful change definition, persistence model, staleness handling, scaling approach, AI restraint) has an explicit stated decision in this document |
