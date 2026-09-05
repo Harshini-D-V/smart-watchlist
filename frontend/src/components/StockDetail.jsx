@@ -31,7 +31,8 @@ function fmt(n, d = 2) {
 
 function secondsAgo(iso) {
   if (!iso) return null;
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  return Math.max(0, diff);
 }
 
 export function StockDetail({ userId, symbol, priceData, diffItem, metaItem, allMeta, allPrices, diffMap, onBack }) {
