@@ -60,7 +60,7 @@ export function CorrelationInsight({ meta, prices, diffMap, currentSymbol, curre
             Correlated with your other {sector.toLowerCase()} holdings
           </p>
           <p className="insight-text">
-            {pcts} — their moves are correlated, not independent signals.
+            {pcts} — both moved in the same direction. Their signals are not independent.
           </p>
         </div>
       </div>
@@ -73,11 +73,11 @@ export function CorrelationInsight({ meta, prices, diffMap, currentSymbol, curre
       <span className="insight-icon" aria-hidden="true">📊</span>
       <div className="insight-body">
         <p className="insight-title">
-          Your {stocks.length} {sector.toLowerCase()} stocks moved together today{' '}
+          {stocks.length} {sector} stocks moved {allUp ? 'up' : 'down'} together today{' '}
           <span className={dirClass}>{direction}</span>
         </p>
         <p className="insight-text">
-          {pcts} — their moves are correlated, not independent signals.
+          {pcts} — they moved in the same direction at the same time. Worth checking whether this is one shared move, not two independent ones.
         </p>
       </div>
     </div>

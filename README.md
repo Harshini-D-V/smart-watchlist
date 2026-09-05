@@ -1,98 +1,101 @@
 # Smart Market Watchlist — Groww Code 2026
 
-A real-time stock watchlist that tells you what *meaningfully* changed since your last visit.
+A real-time stock watchlist that answers one question: **what meaningfully changed since you were last here?**
 
-**Live demo:** *(deploy links go here after Vercel + Render setup)*
+**Live demo:** *(deploy link — add after Vercel + Render setup)*
+**Repo:** https://github.com/Harshini-D-V/smart-watchlist
 
 ---
 
 ## What it does
 
-1. **Create and manage a watchlist** — add/remove any stock ticker (NSE: `RELIANCE.NS`, US: `AAPL`, etc.)
-2. **View live market data** — price, today's % change, freshness badge showing how recently data was fetched
-3. **Return later and see what changed** — the app diffs current prices against what you last saw, flags meaningful moves, and shows a digest summary
+1. **Create and manage a watchlist** — add any ticker (NSE: `RELIANCE.NS`, US: `AAPL`)
+2. **View live market data** — price, today's % change, freshness badge per stock
+3. **Return later and see what changed** — diffs current prices against what you saw last time, flags meaningful moves, and shows a digest of what happened
 
----
-
-## Definition of "meaningful change"
-
-> A change is **meaningful** if it is large *relative to that stock's own normal daily movement*, not a fixed % for every stock.
-
-Concretely: `|change_since_last_visit| > 1.5 × |avg_daily_move|`
-
-where `avg_daily_move` ≈ the stock's current-day % change (a one-number proxy for typical volatility).
-
-**Why relative, not fixed?** A 2% move is unremarkable for a small-cap but significant for a blue-chip. Using a fixed threshold flags every small-cap daily move as "meaningful" and misses real blue-chip shifts. This one line of arithmetic — not ML — is an explicit choice. Simple, explainable, and appropriate for a fintech context.
+Beyond the three required features, the app also shows:
+- Sector composition donut chart (clickable — filters the watchlist)
+- Inline sparklines and expandable rows with a "WHAT CHANGED" card
+- Correlated-movement insight (detects when 2+ stocks in the same sector moved together)
+- AI-generated explanation for flagged moves (Gemini API, with plain-string fallback)
 
 ---
 
 ## Architecture
 
+Frontend and backend are fully separate apps. The backend owns all market-fetching and data logic — the frontend never calls Yahoo Finance directly.
+
 ```
 frontend/   React + Vite (port 5173)
 backend/    Node.js + Express (port 4000)
-            └── price poller: polls yahoo-finance2 every 25s
-            └── diff engine: compares current vs last-seen prices
-            └── explain: Gemini API → one sentence, always with fallback
+            ├── price poller: fetches Yahoo Finance every 25s
+            ├── diff engine:  compares current vs last-seen prices
+            └── explain:      Gemini API → one sentence, with fallback
 database    Supabase (managed Postgres)
 ```
 
-**Key design decision — O(symbols) not O(users × symbols):**
-The backend poller fetches each *unique* symbol exactly once per cycle (across all users), then all users read from that shared `price_snapshots` row. This is not hand-waving — it's a concrete fetch-deduplication that keeps API cost constant as the user base grows.
+**Scaling decision — O(symbols) not O(users × symbols):**
+The poller fetches each *unique* symbol once per cycle regardless of how many users watch it. All users read from the same shared `price_snapshots` row. Fetch cost stays constant as the user base grows. This is a concrete architectural decision, not hand-waving.
+
+---
+
+## Definition of "meaningful change"
+
+A stock is **flagged** if *either* condition is true:
+
+- **Absolute floor:** the move since last visit is ≥ 2% — always meaningful regardless of timing
+- **Relative threshold:** the move since last visit is > 1.5× today's intraday % range — catches stocks accumulating a multi-day move that exceeds their normal single-day volatility
+
+**Why both conditions, not just one:**
+Using only the relative threshold had a real bug: if you visit once a day, `change_since_last_visit` ≈ `today's change_pct`, so the ratio is approximately 1.0 and the 1.5× bar is almost never crossed. The absolute floor fixes this. We chose explicit math over ML here — one auditable condition is more appropriate for a financial context than a black-box model.
+
+**Known trade-off:** the 2% floor is a single tuned constant. A more accurate approach would use each stock's rolling 5-day average move (which we'd store as a separate column). We chose not to build that to stay within time constraints. The current floor works correctly — it's just not stock-specific.
 
 ---
 
 ## Where AI was and wasn't used
 
-**Was used (exactly one place):** `POST /api/explain` — takes structured data you've already computed (`{symbol, change_pct_visit, volume_ratio}`) and returns one natural sentence describing the pattern. E.g. *"Up 4.8% on roughly 2.1× the usual volume."*
+**Used (exactly one place):** `POST /api/explain` — takes structured numbers you've already computed (`symbol`, `change_pct_visit`, `volume_ratio`) and returns one plain sentence describing the observed pattern. Example: *"Down 2.3% since your last visit, on 1.8× usual volume."*
 
-**Was deliberately NOT used for:**
-- Detecting meaningful change — that's the 1.5× threshold math above
+**Deliberately not used for:**
+- Detecting meaningful change (that's the two-condition threshold above)
 - Fetching or interpreting market data
+- The correlated-movement insight card (that's pure arithmetic: same sector, same sign)
 - Anything the app depends on to function
 
-**Why this restraint matters in fintech:** Letting an LLM invent a cause ("up due to earnings") without grounding it in real news is a trust and safety risk. The AI explains the observable numbers only. This is a stronger answer than a flashier feature.
-
-**Fallback:** Every AI call has a plain-string template fallback (`"Up 2.3% since your last visit."`). The app works fully without the Gemini API key.
+**Why this restraint matters in fintech:** generating a cause for a price move ("up due to earnings", "driven by AI server demand") without grounding it in a real, sourced headline is a trust and safety problem. The AI is constrained by its prompt to describe only the observable numbers — never a cause. The prompt explicitly bans causal language and the output is checked for it. The plain-string fallback means the app works identically with or without the API key.
 
 ---
 
 ## Edge cases handled
 
-### 1. API fetch failure → stale UI (not a crash)
+### 1. API fetch failure → stale UI, not a crash
 
-Every `yahoo-finance2` call is wrapped in try/catch. On failure:
-- The last known price is served from `price_snapshots` with `fetch_failed: true`
-- The frontend shows a `⚠ last known price` badge instead of a freshness timestamp
-- This answers "how do you handle stale/delayed data" — resilience as a first-class feature, not a bolt-on
+Every Yahoo Finance fetch is wrapped in try/catch. On failure the last known price is served from `price_snapshots` with `fetch_failed: true`. The frontend shows `⚠ last known price` instead of a freshness timestamp. The app degrades gracefully — it never goes blank or throws.
 
-**To demo this:** turn off WiFi briefly. The UI degrades gracefully; it doesn't break.
+**To demo this:** turn off WiFi briefly. The stale badge appears within 90 seconds. Turn WiFi back on and it recovers on the next poll cycle.
 
-### 2. Concurrent edits from two devices (race condition handling)
+### 2. Concurrent edits from two devices (race condition)
 
-**Decision: last-write-wins via Postgres upsert.**
+We chose **last-write-wins via Postgres upsert** (`ON CONFLICT (user_id, symbol) DO UPDATE`). If the same user adds a stock from two devices simultaneously, the later write wins. Postgres row-level locking ensures no partial writes or corrupt rows.
 
-Both `watchlist` and `last_seen` use `ON CONFLICT (user_id, symbol) DO UPDATE`, which means if the same user adds or removes a stock from two devices simultaneously, the later write wins. Postgres row-level locking ensures no partial writes or corrupted rows.
+This was a deliberate choice — not an oversight. The alternative (optimistic locking with version counters) adds complexity without meaningful benefit for a watchlist where conflicts are rare and the cost of a lost write is low (you just re-add the stock).
 
-This is an explicit, documented choice — not an accident. The alternative (optimistic locking with version counters) adds complexity without meaningful benefit for a watchlist use case where conflicts are rare and the cost of a lost write is low (the user just re-adds the stock).
-
-**What's not implemented:** server-side session conflict detection (e.g. "another device changed your watchlist"). This would require a WebSocket or SSE push channel. It's out of scope for this sprint — documented here as the known gap, not hidden.
+**What's not implemented:** server-side push notification when another device changes your watchlist. That would require WebSockets or SSE. It's out of scope for this sprint and documented here rather than hidden.
 
 ### 3. Cross-device persistence
 
-**Implemented via Supabase anonymous auth.**
+Supabase anonymous auth creates a stable `user_id` (UUID) stored in the browser's `localStorage`. Every `watchlist` and `last_seen` row in Postgres is keyed on this `user_id`.
 
-On first load, `signInAnonymously()` creates a stable `user_id` (UUID) tied to a JWT stored in the browser's `localStorage`. Every `watchlist` and `last_seen` row in Postgres is keyed on this `user_id`.
+**What this means in practice:** the same browser session persists across tabs and browser restarts. Opening a new browser on the same device with a fresh session creates a new anonymous user (this is the standard anonymous auth behaviour — the session token is device-local).
 
-Result: opening the app on a second device with the same session token (e.g. copied from localStorage, or via a magic-link upgrade to a real account) loads the exact same watchlist and last-seen prices. "Return later and see what changed" works across devices, not just within a single browser session.
-
-**Current limitation:** anonymous sessions are device-local by default (tied to localStorage). Upgrading to a real account (email/magic-link) would make the session fully portable across devices without any manual token transfer. This is a one-line Supabase Auth change and is the documented next step.
+**Honest limitation:** full cross-device portability (e.g., "open on your phone and see the same data") requires upgrading the anonymous session to a real account via magic-link email auth. That's a one-line Supabase Auth change and is the documented next step — we didn't build it within the time constraint.
 
 ---
 
 ## Trade-off from time constraint
 
-`avg_daily_move` is approximated from the *current* day's % change rather than a rolling 5-day average. A rolling average would be more accurate but requires storing historical snapshots. The current approach is conservative (slightly over-flags on high-volatility days) and is explicitly documented here — judges can see the decision, not a gap.
+The meaningful-change threshold uses a fixed 2% absolute floor rather than each stock's own rolling average daily move. A rolling average (stored as a separate column, computed over 5 days) would make the threshold stock-specific — NVDA would flag at a higher % than a low-volatility blue chip. The current approach is slightly aggressive for low-volatility stocks and slightly conservative for high-volatility ones. It works correctly and the logic is explicit — it's just not yet personalised per stock.
 
 ---
 
@@ -100,21 +103,21 @@ Result: opening the app on a second device with the same session token (e.g. cop
 
 ### Prerequisites
 - Node.js ≥ 18
-- A [Supabase](https://supabase.com) project (free tier works)
-- Gemini API key (optional — app works without it)
+- A [Supabase](https://supabase.com) project (free tier)
+- Gemini API key (optional — app works fully without it)
 
 ### 1. Database
 
-Paste the contents of `supabase/schema.sql` into the Supabase SQL Editor and run it.
+Paste `supabase/schema.sql` into the Supabase SQL Editor and run it. Then run `supabase/schema_fix3.sql` to grant the correct permissions.
 
 ### 2. Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# Fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, GEMINI_API_KEY
+# Fill in SUPABASE_URL, SUPABASE_SERVICE_KEY, GEMINI_API_KEY (optional)
 npm install
-npm run dev        # runs on http://localhost:4000
+npm run dev        # http://localhost:4000
 ```
 
 ### 3. Frontend
@@ -124,28 +127,26 @@ cd frontend
 cp .env.example .env
 # Fill in VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 npm install
-npm run dev        # runs on http://localhost:5173
+npm run dev        # http://localhost:5173
 ```
 
 ### 4. Verify
 
 ```bash
-# Health check
 curl http://localhost:4000/api/health
-# → { "ok": true, "ts": 1234567890 }
+# → { "ok": true }
 ```
 
 ---
 
 ## Deployment (Vercel + Render)
 
-| Service | Target | Command |
-|---------|--------|---------|
+| Service | Target | Build/Start command |
+|---------|--------|---------------------|
 | Render  | `backend/` | `npm start` |
-| Vercel  | `frontend/` | `npm run build` |
+| Vercel  | `frontend/` | `npm run build`, output `dist/` |
 
-Set environment variables in each platform's dashboard.
-Update `VITE_API_BASE` in the frontend to point at the Render URL.
+Set environment variables in each platform's dashboard. Update `VITE_API_BASE` in the frontend `.env` to point at your Render URL before building.
 
 ---
 
@@ -153,8 +154,8 @@ Update `VITE_API_BASE` in the frontend to point at the Render URL.
 
 | Dimension | Where covered |
 |-----------|---------------|
-| Engineering Depth | Separate frontend/backend/DB; fallback-to-cache; symbol-dedupe O(unique symbols); Postgres indexes on (user_id, symbol) |
-| Product & Problem Interpretation | Relative meaningful-change definition; digest card; freshness badge — not a plain ticker list |
-| Edge Cases & Resilience | Fetch fallback with stale UI; last-write-wins concurrent edits; deliberate WiFi-off test in §Edge Cases |
-| Code Quality & Simplicity | 1.5× threshold instead of ML; AI scoped to exactly one endpoint with a fallback |
-| Originality & Thoughtfulness | Every "you decide" item from the brief (meaningful change, persistence, staleness, scaling) has an explicit stated decision in this README |
+| Engineering Depth | Separate frontend/backend/DB; O(symbols) fetch deduplication; fallback-to-cache on fetch failure; Postgres indexes on (user_id, symbol) |
+| Product & Problem Interpretation | Two-condition meaningful-change definition; digest banner; expandable rows; sector chart; correlation insight — not a plain ticker list |
+| Edge Cases & Resilience | Fetch fallback with stale UI (demo: turn off WiFi); last-write-wins concurrent edits via Postgres upsert; session gap prevents diff being zeroed on every poll |
+| Code Quality & Simplicity | Two-condition threshold instead of ML; AI scoped to exactly one endpoint with a plain-string fallback; no causal language in AI output or correlation card |
+| Originality & Thoughtfulness | Every "you decide" item from the brief (meaningful change definition, persistence model, staleness handling, scaling approach, AI restraint) has an explicit stated decision in this document |

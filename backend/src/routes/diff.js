@@ -1,27 +1,21 @@
 /**
  * GET /api/diff  (requires x-user-id header)
  *
- * Returns a diff of what changed for this user since their last visit.
- * Also updates the `last_seen` snapshot to the current prices.
+ * Meaningful change definition:
+ *   A stock is flagged if |change_pct_visit| crosses EITHER:
+ *     (a) an absolute floor  — ≥ MIN_ABS_MOVE_PCT (e.g. 2%)  — catches any real move, OR
+ *     (b) a relative threshold — > 1.5 × today's intraday % move
+ *         (only useful when today's move is large, e.g. earnings day)
  *
- * Meaningful change definition (per plan §2):
- *   A stock is "flagged" if  |change_since_last_visit| > 1.5 × avg_daily_move
- *   where avg_daily_move ≈ |regularMarketChangePercent| averaged over recent days.
- *   Since we only have current data, we approximate:
- *     avg_daily_move = abs(current_change_pct) — and compare the
- *     price delta since the user's last visit against 1.5× that average.
+ *   Using ONLY today's change_pct as the denominator was a bug:
+ *   if a user visits once a day, change_pct_visit ≈ today's change_pct,
+ *   so the ratio |X| / |X| ≈ 1.0 and the 1.5× threshold is rarely crossed.
+ *   The absolute floor fixes this — a 2%+ move is always flagged regardless
+ *   of when the user last visited.
  *
- *   For a production version you'd store a rolling 5-day avg; this is the
- *   explicit simple-over-ML choice documented in the README.
- *
- * Response shape:
- *   {
- *     items: [
- *       { symbol, price_now, price_then, change_abs, change_pct_visit, flagged, explanation }
- *     ],
- *     last_visit: ISO string | null,
- *     summary: "3 stocks changed since your last visit"
- *   }
+ *   This is documented as an explicit trade-off in the README:
+ *   a rolling 5-day average would be more accurate but requires storing
+ *   historical snapshots — the absolute floor is a deliberate simplification.
  */
 
 import { Router } from 'express';
@@ -32,6 +26,7 @@ const router = Router();
 router.use(requireUserId);
 
 const MEANINGFUL_MULTIPLIER = 1.5;
+const MIN_ABS_MOVE_PCT = 2.0; // flag anything ≥ 2% regardless of timing
 
 router.get('/', async (req, res) => {
   const userId = req.userId;
@@ -84,9 +79,15 @@ router.get('/', async (req, res) => {
       change_abs = price_now - price_then;
       change_pct_visit = (change_abs / price_then) * 100;
 
-      // avg_daily_move approximated as the absolute current daily % move
-      const avg_daily_move = Math.abs(snap?.change_pct ?? change_pct_visit);
-      flagged = Math.abs(change_pct_visit) > MEANINGFUL_MULTIPLIER * avg_daily_move;
+      const absPctVisit = Math.abs(change_pct_visit);
+      const todayMove   = Math.abs(snap?.change_pct ?? 0);
+
+      // Flag if EITHER:
+      //   (a) absolute move ≥ 2% since last visit (floor — always meaningful), OR
+      //   (b) move since visit > 1.5× today's intraday range (relative — catches
+      //       multi-day accumulators that exceed normal single-day volatility)
+      flagged = absPctVisit >= MIN_ABS_MOVE_PCT ||
+                (todayMove > 0 && absPctVisit > MEANINGFUL_MULTIPLIER * todayMove);
     }
 
     return {
