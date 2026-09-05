@@ -2,7 +2,6 @@
 
 A real-time stock watchlist that answers one question: **what meaningfully changed since you were last here?**
 
-**Live demo:** *(deploy link — add after Vercel + Render setup)*
 **Repo:** https://github.com/Harshini-D-V/smart-watchlist
 
 ---
